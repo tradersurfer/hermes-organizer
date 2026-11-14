@@ -1,0 +1,15 @@
+# Virtualenv and bytecode
+.venv/
+__pycache__/
+*.pyc
+
+# Real Drive working copies and scan outputs — these contain Adrian's
+# actual files (including credit screenshots). They stay on this machine
+# and never go into the repo. Mock samples are generated and ARE tracked.
+samples/drive/
+samples/drive-live/
+samples/drive-test/
+sample_reports/
+audit_log.jsonl
+
+.DS_Store
