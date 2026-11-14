@@ -49,7 +49,7 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from .indexer import DRIVE_CLI, RateLimiter
+from .indexer import DRIVE_CLI, DriveIndexer, RateLimiter
 from .proposals import match_approvals, proposal_hash
 
 WRITE_ENABLED = False  # runtime gate: only run_execute.py --execute sets this True
@@ -218,7 +218,7 @@ def _split_folder_path(path: str) -> list[str]:
     return [seg for seg in path.strip("/").split("/") if seg]
 
 
-def resolve_folder(drive: DriveWriter, path: str, root_id: str = "root",
+def resolve_folder(drive: DriveWriter | DriveIndexer, path: str, root_id: str = "root",
                    create: bool = True) -> tuple[str | None, list[str], list[str]]:
     """Resolve ``/Work/Product Photos/2026/`` to a Drive folder ID.
 
@@ -230,6 +230,10 @@ def resolve_folder(drive: DriveWriter, path: str, root_id: str = "root",
     list of {"folder_id", "name", "parent_id"} dicts, so callers can
     log folder creation (rollback needs the IDs; folders are never
     deleted, but the trail must exist).
+
+    ``drive`` may be a DriveWriter (execution) or a DriveIndexer
+    (scan-time, read-only): with create=False only find_child is
+    called, so no write channel is ever involved.
     """
     parent_id = root_id
     created: list[dict] = []

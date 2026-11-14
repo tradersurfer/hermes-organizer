@@ -46,7 +46,7 @@ Modeled on CEO Pack's proven shape (`plugin.yaml` at the root, `tools.py` handle
 
 The plugin's edge over "plain Hermes with a prompt" is a **live dashboard pinned in Hermes Desktop** (top-left, by sessions) showing organizing in real time, plus the approve / verify loop.
 
-- **Status: UNVERIFIED.** CEO Pack has no UI surface (tools / skills / agents only). Before promising the dashboard, verify against the Hermes Desktop extension points whether a plugin can pin a live panel. If no such surface exists, the honest fallback is the HTML report (already built) served locally, and the RFC asks Nous for the panel surface as part of core.
+- **Status: BUILT in v0.1.0 (2026-11-14).** The panel surface was verified against the official Desktop Plugin SDK docs and the pane is built: `hermes-plugin/desktop/plugin.js` (docked left of sessions) + `hermes-plugin/dashboard/plugin_api.py` (FastAPI backend namespace) + `hermes-plugin/dashboard/manifest.json`. 20 dashboard tests pass. Still open: one live Desktop load test of the pane against the real backend before the catalog PR. If no such surface had existed, the honest fallback would have been the HTML report served locally, with the RFC asking Nous for the panel surface as part of core — not needed.
 - **What the dashboard shows when it exists:** live scan progress, per-file proposals with approve/reject, execution results, verification status, rollback button. It is a view over the same proposals/approvals/execution-log files — never a second source of truth.
 
 ## 5. Multi-agent adapters (after the Hermes plugin)

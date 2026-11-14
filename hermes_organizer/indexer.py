@@ -20,6 +20,11 @@ from dataclasses import dataclass, field
 DRIVE_CLI = "/opt/hatch/bin/hatch_gws_cli"
 
 
+def _escape_query_value(value: str) -> str:
+    """Escape a value for a Drive search query string literal."""
+    return value.replace("\\", "\\\\").replace("'", "\\'")
+
+
 @dataclass
 class DriveFile:
     file_id: str
@@ -71,6 +76,43 @@ class DriveIndexer:
         }
         data = self._run(["files", "list", "--params", json.dumps(params)])
         return [self._to_file(f) for f in data.get("files", [])]
+
+    def find_child(self, parent_id: str, name: str,
+                   mime_type: str | None = None) -> dict | None:
+        """First non-trashed child of ``parent_id`` with this name.
+
+        Read-only (files list). Lets the watcher resolve a target
+        folder path without the write channel — see
+        execution.resolve_folder(..., create=False).
+        """
+        q = (
+            f"'{parent_id}' in parents and "
+            f"name = '{_escape_query_value(name)}' and trashed=false"
+        )
+        if mime_type:
+            q += f" and mimeType = '{mime_type}'"
+        data = self._run(["files", "list", "--params", json.dumps({
+            "q": q,
+            "pageSize": 10,
+            "fields": "files(id,name,mimeType,parents)",
+        })])
+        files = data.get("files", [])
+        return files[0] if files else None
+
+    def list_children(self, folder_id: str) -> list[dict]:
+        """Non-trashed direct children of a folder (id, name, parents).
+
+        Read-only (files list). All children, not just images — a
+        name collision counts whatever the file type is.
+        """
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", folder_id):
+            raise ValueError(f"invalid Drive folder ID: {folder_id!r}")
+        data = self._run(["files", "list", "--params", json.dumps({
+            "q": f"'{folder_id}' in parents and trashed=false",
+            "pageSize": 100,
+            "fields": "files(id,name,mimeType,parents)",
+        })])
+        return data.get("files", [])
 
     def list_folder_images(self, folder_id: str, page_size: int = 50) -> list[DriveFile]:
         """Read-only listing of images directly inside one Drive folder.

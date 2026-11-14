@@ -529,10 +529,19 @@ def test_no_delete_call_anywhere_in_codebase():
              os.path.join(REPO_ROOT, "hermes-plugin"),
              os.path.join(REPO_ROOT, "run_execute.py"),
              os.path.join(REPO_ROOT, "run_scan.py")]
+    paths: list[str] = []
     for root in roots:
-        paths = ([os.path.join(root, f) for f in os.listdir(root)
-                  if f.endswith(".py")] if os.path.isdir(root) else [root])
-        for path in paths:
+        if os.path.isdir(root):
+            # Recursive: subdirectories count too (dashboard/plugin_api.py
+            # lives one level down — a top-level-only listing missed it).
+            for dirpath, _, filenames in os.walk(root):
+                if "__pycache__" in dirpath:
+                    continue
+                paths.extend(os.path.join(dirpath, f) for f in filenames
+                             if f.endswith(".py"))
+        else:
+            paths.append(root)
+    for path in paths:
             with open(path, encoding="utf-8") as fh:
                 src = fh.read()
             assert "files delete" not in src, f"{path} calls files delete"

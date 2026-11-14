@@ -9,6 +9,10 @@ Format: YYYY-MM-DD_<Subcategory>_<Topic>.<ext>
   preferred over generic verbs ("The image presents..."), and
   deduplicate_filenames() guarantees no scan emits the same
   (filename, folder) twice — repeats get a _2, _3, ... suffix.
+  v0.7.1: deduplicate_filenames() also takes the filenames already
+  present in the target folders (``existing``), read at scan time —
+  so a proposal colliding with a file that is already there gets its
+  suffix at proposal time instead of being refused at execute time.
 - Target folder: taxonomy folder template with {year} filled in.
 """
 from __future__ import annotations
@@ -235,6 +239,7 @@ def propose_filename(
 
 def deduplicate_filenames(
     pairs: list[tuple[str | None, str]],
+    existing: list[tuple[str | None, str]] | None = None,
 ) -> list[tuple[str | None, str]]:
     """Make (filename, folder) pairs unique within one scan.
 
@@ -245,8 +250,18 @@ def deduplicate_filenames(
     Same filename in *different* folders is fine and left alone.
     Review results (filename None — no rename happens) pass through
     untouched.
+
+    ``existing`` seeds the check with (filename, folder) pairs that
+    already live in the target folders (read at scan time — see
+    watcher._existing_target_names). A proposal colliding with an
+    existing file gets its _2/_3/... suffix at proposal time, so the
+    executor's target-name-free check never has to refuse it. Without
+    ``existing`` only collisions *within* the scan are deduped.
     """
     seen: set[tuple[str, str]] = set()
+    for filename, folder in existing or []:
+        if filename is not None:
+            seen.add((folder, filename))
     out: list[tuple[str | None, str]] = []
     for filename, folder in pairs:
         if filename is None:
