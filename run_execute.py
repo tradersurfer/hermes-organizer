@@ -117,13 +117,11 @@ def main() -> int:
         return 1 if bad else 0
 
     if args.rollback:
-        if args.execute:
-            # The runtime gate: only --execute on the command line
-            # flips WRITE_ENABLED. rollback() checks it before writing.
-            execution.WRITE_ENABLED = True
+        token = execution.mint_write_token() if args.execute else None
         try:
             report = execution.rollback(
-                args.rollback, drive, execute=args.execute
+                args.rollback, drive, execute=args.execute,
+                write_token=token,
             )
         except execution.ExecutionError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)
@@ -162,11 +160,14 @@ def main() -> int:
         return 2
 
     if args.execute:
-        execution.WRITE_ENABLED = True
+        # The runtime gate: only --execute on the command line mints
+        # the per-call write token rollback()/execute() require.
+        token = execution.mint_write_token()
         try:
             report = execution.execute(
                 proposals_doc, approvals_doc, drive, args.log,
-                execute=True, root_folder_id=args.root,
+                execute=True, write_token=token,
+                root_folder_id=args.root,
             )
         except execution.ExecutionError as exc:
             print(f"ERROR: {exc}", file=sys.stderr)

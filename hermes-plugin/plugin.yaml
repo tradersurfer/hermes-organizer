@@ -1,8 +1,8 @@
 manifest_version: 2
 api_version: 1
 name: hermes-organizer
-version: 0.1.1
-description: Hermes Organizer — index, OCR/vision-classify, and propose renames for unstructured Google Drive files, then rename and move them only after the owner's per-item approval, with verification and rollback. Scan -> propose -> approve -> execute -> verify. Read-only by default; nothing is renamed, moved, or deleted without an approvals file whose hashes match the proposals. v0.1.1 adds the live dashboard pane and target-aware dedup (proposals check the destination folder's live filenames). v0.1.0 was the fresh public start (the core tool is v0.7.0 in the same repo).
+version: 0.1.2
+description: Hermes Organizer — index, OCR/vision-classify, and propose renames for unstructured Google Drive files, then rename and move them only after the owner's per-item approval, with verification and rollback. Scan -> propose -> approve -> execute -> verify. Read-only by default; nothing is renamed, moved, or deleted without an approvals file whose hashes match the proposals. v0.1.2 fixes the Grok review findings - a per-call write token replaces the module-global flag, approve_all is removed, every Drive list call is paginated (token requested in fields), and vision keys moved to optional_env. v0.1.1 added the live dashboard pane and target-aware dedup (proposals check the destination folder's live filenames). v0.1.0 was the fresh public start (the core tool is v0.7.0 in the same repo).
 author: tradersurfer93
 license: MIT
 requires_hermes: ">=0.21.6"
@@ -18,10 +18,22 @@ provides_tools:
 python_dependencies:
   - "pydantic>=2.0,<3"
   - "rapidocr-onnxruntime>=1.3,<2"
-requires_env:
-  - CLOUDFLARE_API_TOKEN
-  - CLOUDFLARE_ACCOUNT_ID
-  - GEMINI_API_KEY
+# Vision keys are OPTIONAL, not required: without them the organizer
+# scans OCR-only, which is a supported configuration (see
+# config_schema.vision_provider and README "Vision is optional").
+# optional_env is the real Hermes manifest block for this (see the
+# Hermes "Build a Hermes Plugin" / platform-adapter docs):
+# requires_env would gate loading / force install prompts for keys
+# most users never need. Keys belong in the host's secret_scope when
+# available; they never pass through tool arguments.
+optional_env:
+  - name: CLOUDFLARE_API_TOKEN
+    description: "Cloudflare Workers AI token — enables the default vision provider. Optional: without it the organizer scans OCR-only."
+    secret: true
+  - name: CLOUDFLARE_ACCOUNT_ID
+    description: "Cloudflare account ID for Workers AI. Optional: only needed with CLOUDFLARE_API_TOKEN."
+  - name: GEMINI_API_KEY
+    description: "Gemini API key — enables the gemini vision provider. Optional: only needed when vision_provider is gemini."
 config_schema:
   vision_provider: {type: str, default: "cloudflare", label: "Vision provider", description: "cloudflare (default) or gemini. Vision is a second opinion only — OCR-only scanning works with no credentials at all."}
   approval_required: {type: bool, default: true, label: "Require owner approval for renames/moves", description: "When true (default), organizer_execute refuses without an approvals file whose hashes match the proposals. Do not disable."}

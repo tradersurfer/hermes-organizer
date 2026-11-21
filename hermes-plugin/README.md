@@ -1,8 +1,8 @@
-# Hermes Organizer — Hermes Plugin (v0.1.0)
+# Hermes Organizer — Hermes Plugin (v0.1.2)
 
 The Organizer as an installable Hermes plugin: index, OCR/vision-classify, and propose renames for unstructured Google Drive files — then rename and move them only after the owner's per-item approval, with verification and rollback.
 
-- **Version:** 0.1.0 — the fresh public start of the plugin. The core tool in the same repo is v0.7.0.
+- **Version:** 0.1.2 — Grok-review fixes (per-call write token, approve_all removed, pagination, optional vision keys). The core tool in the same repo is v0.7.0.
 - **Layout:** this `hermes-plugin/` directory is the plugin (manifest, handlers, schemas, skills, demo). The core package `hermes_organizer/` lives beside it in the same repo; the plugin wraps it and re-implements nothing.
 - **Flow:** scan → propose → approve → execute → verify, with rollback. Read-only by default; dry-run is the default for every write.
 - **Tools (7):** `organizer_scan`, `organizer_propose`, `organizer_approve`, `organizer_execute`, `organizer_verify`, `organizer_rollback`, `organizer_report`.
@@ -13,7 +13,7 @@ The Organizer as an installable Hermes plugin: index, OCR/vision-classify, and p
 
 ## The gates (read this first)
 
-- **Approval is per item, per scan.** `organizer_approve` records the user's yes for exact proposal entries. A re-scan changes the proposals, the hashes change, and the old approval is refused as stale. Approval binds to ONE scan's proposals — never re-scan between approval and execution.
+- **Approval is per item, per scan.** `organizer_approve` records the user's yes for exact proposal entries. A re-scan changes the proposals, the hashes change, and the old approval is refused as stale. Approval binds to ONE scan's proposals — never re-scan between approval and execution. The approvals file is trusted input: the hash binds an approval to its proposal, but it does not protect against someone who can write the approvals file (they can compute a matching hash) — see ARCHITECTURE.md §6 for the threat model. Approval is always explicit per file ID; there is no approve-all.
 - **`organizer_execute` is a dry-run unless `execute: true` is passed** — and the agent must only pass that after the user's explicit yes on the exact plan. A casual ack or reaction is never a yes.
 - **Nothing is ever deleted.** There is no delete call in the plugin or the core. Rollback restores names and parents; it never removes a file.
 - **Confidence threshold is locked at 0.60.** It is shown in `config_schema` for transparency and is not user-lowerable. Files below 0.60 go to human review with no proposed filename.
@@ -24,7 +24,7 @@ The Organizer as an installable Hermes plugin: index, OCR/vision-classify, and p
 - `vision_provider`: `cloudflare` (default) or `gemini`.
 - `approval_required`: bool, default `true`. Do not disable.
 - `confidence_threshold`: shown as `"0.60"`, locked — changing it has no effect.
-- **Credentials come from the host, never from the plugin or the repo.** The manifest lists `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `GEMINI_API_KEY` under `requires_env` (prompted at install; leave them empty for OCR-only use). The handlers refuse any credential-like value in tool arguments and never echo one.
+- **Credentials come from the host, never from the plugin or the repo.** The manifest lists `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, and `GEMINI_API_KEY` under `optional_env` — vision is optional, OCR-only scanning is a supported configuration with no credentials at all (leave them unset). For the catalog they move to `agent.secret_scope.get_secret(NAME)` per rule 11. The handlers refuse any credential-like value in tool arguments and never echo one.
 
 ## Dependencies — decided, not silently bundled
 
@@ -56,6 +56,6 @@ The live dashboard Adrian wants — a panel pinned in Hermes Desktop showing org
 - **Dashboard — BUILT in v0.1.0** (`desktop/plugin.js` + `dashboard/plugin_api.py` + `dashboard/manifest.json`, 20 tests in `tests/test_dashboard.py`). Still to do before the catalog PR: load the unified package in Hermes Desktop once and run the pane against the real backend — the pane is verified by static checks + `node --check` + the mocked API harness, not yet by a live Desktop load.
 - **Plugin.yaml location — VERIFIED 2026-11-14.** A manifest in a subdirectory is supported: catalog entries carry a `subdir` field ("Path to the plugin inside the repo for monorepos", default repo root), and direct installs accept `owner/repo/path/to/plugin` (which downloads only that folder's files). So `hermes-plugin/plugin.yaml` inside the fresh public repo is fine — the catalog entry declares `subdir: hermes-plugin`. No need to flatten `plugin.yaml` to the repo root. Sources: the Plugin Catalog docs (`/docs/user-guide/features/plugin-catalog`) and the Plugins docs (`/docs/user-guide/features/plugins`).
 - **Drive auth — catalog-ready path.** The core reaches Drive through `hatch_gws_cli` today (the local-dev channel). Catalog rule 11 requires credentials through Hermes routes only: declare the Google OAuth client under `oauth:` in `plugin.yaml`, sign in with `hermes auth add`, and use it through Hermes's helper — a plugin never reads another tool's token file. That migration is a pre-catalog item, not part of v0.1.0.
-- **Vision credentials — same rule.** Today they resolve from env vars or the host's registered connections. For the catalog they move to `agent.secret_scope.get_secret(NAME)` per rule 11. Also verify the `requires_env` install prompts are skippable for OCR-only users.
+- **Vision credentials — same rule.** Today they resolve from env vars or the host's registered connections. For the catalog they move to `agent.secret_scope.get_secret(NAME)` per rule 11. Vision keys are declared under `optional_env` in the manifest (not `requires_env`), so install never requires them and OCR-only is a supported configuration.
 - **Catalog submission itself:** regular catalog merge only — a human-reviewed PR to `hermes-agent` with a full 40-char SHA pin. No Typeform, no X demo video. PR description structured like a README, new things in bullet points.
 - **After the catalog PR + Nous RFC (in parallel):** MCP server adapter, then GPT actions, then T3 scoping.

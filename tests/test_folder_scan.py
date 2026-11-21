@@ -63,13 +63,13 @@ class StubDriveIndexer:
         self.listed_unorganized = False
         self.downloaded = []
 
-    def list_folder_images(self, folder_id, page_size=50):
+    def list_folder_images(self, folder_id, page_size=1000, limit=None):
         self.listed_folder = folder_id
-        return self.files
+        return self.files[:limit] if limit is not None else self.files
 
-    def list_unorganized(self, page_size=50):
+    def list_unorganized(self, page_size=1000, limit=None):
         self.listed_unorganized = True
-        return self.files
+        return self.files[:limit] if limit is not None else self.files
 
     def download(self, file_id, dest_path):
         self.downloaded.append(file_id)

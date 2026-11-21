@@ -174,15 +174,15 @@ def _drive(monkeypatch, files=None):
     return fake
 
 
-def _enable_writes(monkeypatch):
-    monkeypatch.setattr(execution_mod, "WRITE_ENABLED", True)
+def _token():
+    """Mint a fresh single-use write token for one execute()/rollback() call."""
+    return execution_mod.mint_write_token()
 
 
 # --- gates ---
 
 def test_execute_refuses_without_execute_flag(monkeypatch, tmp_path):
     fake = _drive(monkeypatch)
-    _enable_writes(monkeypatch)
     doc = _proposals_doc([_entry()])
     with pytest.raises(GateRefused, match="--execute"):
         execution_mod.execute(doc, _approve(doc), DriveWriter(),
@@ -190,11 +190,10 @@ def test_execute_refuses_without_execute_flag(monkeypatch, tmp_path):
     assert fake.writes == []
 
 
-def test_execute_refuses_without_write_enabled(monkeypatch, tmp_path):
+def test_execute_refuses_without_write_token(monkeypatch, tmp_path):
     fake = _drive(monkeypatch)
-    monkeypatch.setattr(execution_mod, "WRITE_ENABLED", False)
     doc = _proposals_doc([_entry()])
-    with pytest.raises(GateRefused):
+    with pytest.raises(GateRefused, match="write token"):
         execution_mod.execute(doc, _approve(doc), DriveWriter(),
                               str(tmp_path / "log.jsonl"), execute=True)
     assert fake.writes == []  # refused before any Drive call
@@ -202,30 +201,27 @@ def test_execute_refuses_without_write_enabled(monkeypatch, tmp_path):
 
 def test_execute_refuses_unapproved_entry(monkeypatch, tmp_path):
     fake = _drive(monkeypatch)
-    _enable_writes(monkeypatch)
     doc = _proposals_doc([_entry()])  # approved stays False
     with pytest.raises(GateRefused, match="not approved"):
         execution_mod.execute(doc, doc, DriveWriter(),
-                              str(tmp_path / "log.jsonl"), execute=True)
+                              str(tmp_path / "log.jsonl"), execute=True, write_token=_token())
     assert fake.writes == []
 
 
 def test_execute_refuses_on_hash_mismatch(monkeypatch, tmp_path):
     fake = _drive(monkeypatch)
-    _enable_writes(monkeypatch)
     proposals = _proposals_doc([_entry()])
     approvals = _approve(proposals)
     approvals["proposals"][0]["proposal_hash"] = "0" * 64  # tampered
     with pytest.raises(GateRefused, match="hash mismatch"):
         execution_mod.execute(proposals, approvals, DriveWriter(),
-                              str(tmp_path / "log.jsonl"), execute=True)
+                              str(tmp_path / "log.jsonl"), execute=True, write_token=_token())
     assert fake.writes == []
 
 
 def test_execute_refuses_stale_approval_after_rescan(monkeypatch, tmp_path):
     """Re-scan renames the proposal -> old approval hash no longer matches."""
     fake = _drive(monkeypatch)
-    _enable_writes(monkeypatch)
     old_approvals = _approve(_proposals_doc([_entry()]))
     rescanned = _proposals_doc([_entry(
         proposed_filename="2026-11-14_ProductPhoto_other_mockup.jpg")])
@@ -233,7 +229,7 @@ def test_execute_refuses_stale_approval_after_rescan(monkeypatch, tmp_path):
         FILE_ID, "2026-11-14_ProductPhoto_other_mockup.jpg", TARGET_PATH)
     with pytest.raises(GateRefused, match="hash mismatch"):
         execution_mod.execute(rescanned, old_approvals, DriveWriter(),
-                              str(tmp_path / "log.jsonl"), execute=True)
+                              str(tmp_path / "log.jsonl"), execute=True, write_token=_token())
     assert fake.writes == []
 
 
@@ -243,7 +239,6 @@ def test_execute_refuses_when_target_name_exists(monkeypatch, tmp_path):
         "parents": ["target-folder-id"],
     }]
     fake = _drive(monkeypatch, files)
-    _enable_writes(monkeypatch)
     # Target folder already exists in the fake, holding the same name.
     fake.state["work"] = {"id": "work", "name": "Work",
                           "mimeType": FOLDER_MIME, "parents": ["root"]}
@@ -255,7 +250,7 @@ def test_execute_refuses_when_target_name_exists(monkeypatch, tmp_path):
     doc = _proposals_doc([_entry()])
     with pytest.raises(GateRefused, match="already exists"):
         execution_mod.execute(doc, _approve(doc), DriveWriter(),
-                              str(tmp_path / "log.jsonl"), execute=True)
+                              str(tmp_path / "log.jsonl"), execute=True, write_token=_token())
     assert fake.writes == []
 
 
@@ -263,11 +258,10 @@ def test_execute_refuses_when_file_state_changed(monkeypatch, tmp_path):
     """File renamed between plan and write: the re-check refuses."""
     fake = _drive(monkeypatch)
     fake.tamper_after_gets = 1  # plan's get is clean; execute's re-get is not
-    _enable_writes(monkeypatch)
     doc = _proposals_doc([_entry()])
     with pytest.raises(GateRefused, match="changed since the plan"):
         execution_mod.execute(doc, _approve(doc), DriveWriter(),
-                              str(tmp_path / "log.jsonl"), execute=True)
+                              str(tmp_path / "log.jsonl"), execute=True, write_token=_token())
     assert fake.writes == []
 
 
@@ -305,11 +299,10 @@ def test_plan_reports_review_entries_as_skipped(monkeypatch):
 
 def test_happy_path_renames_moves_and_logs(monkeypatch, tmp_path):
     fake = _drive(monkeypatch)
-    _enable_writes(monkeypatch)
     log_path = str(tmp_path / "execution-log.jsonl")
     doc = _proposals_doc([_entry()])
     report = execution_mod.execute(doc, _approve(doc), DriveWriter(),
-                                   log_path, execute=True)
+                                   log_path, execute=True, write_token=_token())
     assert len(report["executed"]) == 1
     assert len(report["folders_created"]) == 3  # Work, Product Photos, 2026
     assert report["verification"][0]["ok"] is True
@@ -344,13 +337,12 @@ def test_happy_path_renames_moves_and_logs(monkeypatch, tmp_path):
 
 def test_rollback_restores_original_name_and_parents(monkeypatch, tmp_path):
     fake = _drive(monkeypatch)
-    _enable_writes(monkeypatch)
     log_path = str(tmp_path / "execution-log.jsonl")
     doc = _proposals_doc([_entry()])
     execution_mod.execute(doc, _approve(doc), DriveWriter(),
-                          log_path, execute=True)
+                          log_path, execute=True, write_token=_token())
     writes_after_execute = len(fake.writes)
-    report = execution_mod.rollback(log_path, DriveWriter(), execute=True)
+    report = execution_mod.rollback(log_path, DriveWriter(), execute=True, write_token=_token())
     assert len(report["restored"]) == 1
     assert report["restored"][0]["restored_name"] == ORIGINAL_NAME
     assert report["restored"][0]["restored_parent_ids"] == [SRC_FOLDER]
@@ -362,11 +354,10 @@ def test_rollback_restores_original_name_and_parents(monkeypatch, tmp_path):
 
 def test_rollback_dry_run_makes_no_writes(monkeypatch, tmp_path):
     fake = _drive(monkeypatch)
-    _enable_writes(monkeypatch)
     log_path = str(tmp_path / "execution-log.jsonl")
     doc = _proposals_doc([_entry()])
     execution_mod.execute(doc, _approve(doc), DriveWriter(),
-                          log_path, execute=True)
+                          log_path, execute=True, write_token=_token())
     writes_after_execute = len(fake.writes)
     report = execution_mod.rollback(log_path, DriveWriter(), execute=False)
     assert report["refused"]  # dry-run refusal message
@@ -378,11 +369,10 @@ def test_rollback_dry_run_makes_no_writes(monkeypatch, tmp_path):
 
 def test_verification_detects_mismatch(monkeypatch, tmp_path):
     fake = _drive(monkeypatch)
-    _enable_writes(monkeypatch)
     log_path = str(tmp_path / "execution-log.jsonl")
     doc = _proposals_doc([_entry()])
     execution_mod.execute(doc, _approve(doc), DriveWriter(),
-                          log_path, execute=True)
+                          log_path, execute=True, write_token=_token())
     # Someone renames the file externally after execution.
     fake.state[FILE_ID]["name"] = "someone-else-renamed-me.jpg"
     verification = execution_mod.verify_log(log_path, DriveWriter())
@@ -394,13 +384,12 @@ def test_verification_detects_mismatch(monkeypatch, tmp_path):
 
 def test_rollback_reports_missing_file(monkeypatch, tmp_path):
     fake = _drive(monkeypatch)
-    _enable_writes(monkeypatch)
     log_path = str(tmp_path / "execution-log.jsonl")
     doc = _proposals_doc([_entry()])
     execution_mod.execute(doc, _approve(doc), DriveWriter(),
-                          log_path, execute=True)
+                          log_path, execute=True, write_token=_token())
     del fake.state[FILE_ID]  # file gone from Drive
-    report = execution_mod.rollback(log_path, DriveWriter(), execute=True)
+    report = execution_mod.rollback(log_path, DriveWriter(), execute=True, write_token=_token())
     assert report["restored"] == []
     assert len(report["missing"]) == 1
 
@@ -424,11 +413,10 @@ def test_update_timeout_applied_is_logged_and_continues(monkeypatch, tmp_path):
     """Update times out but applied server-side: verify, log, continue."""
     fake = _drive(monkeypatch, _two_files())
     fake.timeout_on_update = "applied"
-    _enable_writes(monkeypatch)
     log_path = str(tmp_path / "execution-log.jsonl")
     doc = _two_file_docs()
     report = execution_mod.execute(doc, _approve(doc), DriveWriter(),
-                                   log_path, execute=True)
+                                   log_path, execute=True, write_token=_token())
     assert len(report["executed"]) == 2
     assert all(v["ok"] for v in report["verification"])
     records = [r for r in execution_mod.load_log(log_path)
@@ -442,12 +430,11 @@ def test_update_timeout_dropped_aborts_run(monkeypatch, tmp_path):
     """Update times out and did NOT apply: abort, log nothing for it."""
     fake = _drive(monkeypatch, _two_files())
     fake.timeout_on_update = "dropped"
-    _enable_writes(monkeypatch)
     log_path = str(tmp_path / "execution-log.jsonl")
     doc = _two_file_docs()
     with pytest.raises(execution_mod.ExecutionError, match="timed out"):
         execution_mod.execute(doc, _approve(doc), DriveWriter(),
-                              log_path, execute=True)
+                              log_path, execute=True, write_token=_token())
     records = [r for r in execution_mod.load_log(log_path)
                if "file_id" in r] if os.path.exists(log_path) else []
     assert records == []

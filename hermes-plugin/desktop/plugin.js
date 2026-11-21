@@ -1,4 +1,4 @@
-// Hermes Organizer — live dashboard pane (v0.1.0).
+// Hermes Organizer — live dashboard pane (v0.1.2).
 //
 // A single ESM file, loaded uncompiled from the unified package
 // (hermes-plugin/desktop/plugin.js). It imports only

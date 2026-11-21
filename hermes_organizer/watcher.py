@@ -183,9 +183,9 @@ def scan_drive_sample(indexer: DriveIndexer, download_dir: str,
     results: list[OrganizerResult] = []
     seen_hashes: dict[str, str] = {}
     if folder_id is not None:
-        files = indexer.list_folder_images(folder_id, page_size=limit)
+        files = indexer.list_folder_images(folder_id, limit=limit)
     else:
-        files = indexer.list_unorganized(page_size=limit)
+        files = indexer.list_unorganized(limit=limit)
     for f in files:
         dest = os.path.join(download_dir, f.name)
         try:

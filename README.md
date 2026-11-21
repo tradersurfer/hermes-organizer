@@ -492,8 +492,12 @@ python run_execute.py --verify execution-log.jsonl
   changes the proposal, the hash changes, and the old approval is
   refused as stale.
 - **Safety gates** (the executor refuses unless ALL hold):
-  `--execute` passed AND module `WRITE_ENABLED` set (only
-  `run_execute.py --execute` sets it); a valid approvals file;
+  `--execute` passed AND a fresh per-call write token minted at
+  that exact moment by `run_execute.py --execute` (one token
+  authorizes one call; `execute()` refuses without it, and the
+  old module-global `WRITE_ENABLED` flag was removed 2026-11-21
+  because two concurrent gateway requests could interleave on it);
+  a valid approvals file;
   every actionable proposal approved with a matching hash; the
   target name does not already exist in the target folder (checked
   by listing the folder before each rename — the namer's dedup
@@ -545,7 +549,7 @@ python run_execute.py --verify execution-log.jsonl
   re-scan before any further execute.
 - **Tests:** 110 total (89 existing + 21 new in
   `tests/test_execution.py`, against an in-memory fake Drive):
-  refuses without `--execute`, without `WRITE_ENABLED`, without
+  refuses without `--execute`, without a valid write token, without
   approvals, on hash mismatch, on stale approval after a re-scan,
   on target-name collision, on changed file state; dry-run makes
   zero write calls; happy path renames+moves one file and logs it

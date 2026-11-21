@@ -157,11 +157,11 @@ class StubDriveIndexer:
         self.fail_listing = fail_listing
         self.list_children_calls = 0
 
-    def list_folder_images(self, folder_id, page_size=50):
-        return self.files
+    def list_folder_images(self, folder_id, page_size=1000, limit=None):
+        return self.files[:limit] if limit is not None else self.files
 
-    def list_unorganized(self, page_size=50):
-        return self.files
+    def list_unorganized(self, page_size=1000, limit=None):
+        return self.files[:limit] if limit is not None else self.files
 
     def download(self, file_id, dest_path):
         os.makedirs(os.path.dirname(dest_path) or ".", exist_ok=True)

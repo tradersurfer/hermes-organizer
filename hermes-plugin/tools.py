@@ -324,19 +324,18 @@ def organizer_approve(args, **kwargs) -> str:
     approvals_path = parsed.get("approvals_path")
     if not proposals_path or not approvals_path:
         return _err("Pass 'proposals_path' and 'approvals_path'.")
-    approve_all = bool(parsed.get("approve_all", False))
     approved_ids = parsed.get("approved_file_ids") or []
     if not isinstance(approved_ids, list):
         return _err("'approved_file_ids' must be a list of file IDs.")
-    if not approve_all and not approved_ids:
+    if not approved_ids:
         return _err(
-            "Nothing to approve: pass 'approved_file_ids' or "
-            "'approve_all': true."
+            "Nothing to approve: pass 'approved_file_ids' with the "
+            "exact file IDs the user approved."
         )
     try:
         proposals_doc = load_proposals(proposals_path)
         by_id = {e["file_id"]: e for e in proposals_doc["proposals"]}
-        wanted = set(by_id) if approve_all else set(approved_ids)
+        wanted = set(approved_ids)
         for file_id in wanted:
             entry = by_id.get(file_id)
             if entry is None:
@@ -387,9 +386,10 @@ def organizer_execute(args, **kwargs) -> str:
     actionable proposal is approved with a matching proposal_hash and
     its target name is free in the target folder. The agent must only
     pass execute: true after the user approved the exact plan. The
-    core's WRITE_ENABLED gate is set for this call only and restored
-    afterwards. Nothing is ever deleted; every change is written to
-    the execution log before moving to the next file.
+    core's per-call write token is minted for this call only — there
+    is no shared flag to race on. Nothing is ever deleted; every
+    change is written to the execution log before moving to the next
+    file.
     """
     parsed, err = _prep(args)
     if err:
@@ -422,14 +422,12 @@ def organizer_execute(args, **kwargs) -> str:
                 "note": "Dry-run only — nothing was renamed, moved, or "
                         "created. Pass execute: true to perform this plan.",
             })
-        _execution.WRITE_ENABLED = True
-        try:
-            report = _execution.execute(
-                proposals_doc, approvals_doc, drive, log_path,
-                execute=True, root_folder_id=root_folder_id,
-            )
-        finally:
-            _execution.WRITE_ENABLED = False
+        token = _execution.mint_write_token()
+        report = _execution.execute(
+            proposals_doc, approvals_doc, drive, log_path,
+            execute=True, write_token=token,
+            root_folder_id=root_folder_id,
+        )
         out = {
             "mode": "executed",
             "executed": report["executed"],
@@ -504,13 +502,10 @@ def organizer_rollback(args, **kwargs) -> str:
     do_execute = bool(parsed.get("execute", False))
     try:
         drive = _execution.DriveWriter()
-        _execution.WRITE_ENABLED = do_execute
-        try:
-            report = _execution.rollback(
-                log_path, drive, execute=do_execute
-            )
-        finally:
-            _execution.WRITE_ENABLED = False
+        token = _execution.mint_write_token() if do_execute else None
+        report = _execution.rollback(
+            log_path, drive, execute=do_execute, write_token=token
+        )
         out = {
             "mode": "executed" if do_execute else "dry-run",
             "restored": report["restored"],

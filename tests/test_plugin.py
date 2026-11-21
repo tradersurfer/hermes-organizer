@@ -74,11 +74,18 @@ def test_manifest_parses_and_lists_seven_tools():
     with open(os.path.join(PLUGIN_DIR, "plugin.yaml"), encoding="utf-8") as fh:
         manifest = yaml.safe_load(fh)
     assert manifest["name"] == "hermes-organizer"
-    assert manifest["version"] == "0.1.0"
+    assert manifest["version"] == "0.1.2"
     assert manifest["author"] == "tradersurfer93"
     assert manifest["license"] == "MIT"
     assert manifest["requires_hermes"] == ">=0.21.6"
     assert manifest["provides_tools"] == TOOLS
+    # Vision keys are optional, not required: OCR-only is a supported
+    # configuration, so the manifest must not gate loading on them.
+    assert "requires_env" not in manifest
+    optional = {e["name"] for e in manifest["optional_env"]}
+    assert optional == {
+        "CLOUDFLARE_API_TOKEN", "CLOUDFLARE_ACCOUNT_ID", "GEMINI_API_KEY",
+    }
 
 
 def test_manifest_deps_are_bounded_and_config_defaults():
@@ -283,7 +290,12 @@ def test_execute_happy_path_verify_and_rollback(tools, tmp_path, monkeypatch):
     assert len(report["executed"]) == len(actionable)
     assert all(v["ok"] for v in report["verification"])
     assert fake.writes, "execute must have written via the fake"
-    assert execution_mod.WRITE_ENABLED is False  # gate restored per call
+    # No authorization lingers after the call: a direct core execute
+    # with execute=True but no token is refused.
+    approvals_doc = json.load(open(approvals_path, encoding="utf-8"))
+    with pytest.raises(execution_mod.GateRefused):
+        execution_mod.execute(doc, approvals_doc, DriveWriter(),
+                              log_path, execute=True)
     verified = _call(tools, "organizer_verify", {"log_path": log_path})
     assert verified["status"] == "success"
     assert verified["verified_ok"] == verified["total"] == len(actionable)
@@ -293,7 +305,6 @@ def test_execute_happy_path_verify_and_rollback(tools, tmp_path, monkeypatch):
     assert rolled["mode"] == "dry-run"
     assert len(rolled["would_restore"]) == len(actionable)
     assert len(fake.writes) == writes_before  # rollback dry-run writes nothing
-    assert execution_mod.WRITE_ENABLED is False
 
 
 def test_report_renders_html(tools, tmp_path):

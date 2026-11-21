@@ -379,7 +379,6 @@ async def post_approve(body: dict) -> dict:
         "proposals_path": proposals_path,
         "approvals_path": approvals_path,
         "approved_file_ids": body.get("approved_file_ids") or [],
-        "approve_all": bool(body.get("approve_all", False)),
         "note": body.get("note", "approved in the Organizer pane"),
     })
     if out.get("status") == "success":

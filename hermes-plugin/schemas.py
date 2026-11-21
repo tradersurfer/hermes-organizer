@@ -68,8 +68,7 @@ ORGANIZER_APPROVE = {
         "properties": {
             "proposals_path": {"type": "string", "description": "Proposals file path."},
             "approvals_path": {"type": "string", "description": "Path to write the approvals file."},
-            "approved_file_ids": {"type": "array", "items": {"type": "string"}, "description": "File IDs the user approved, exactly as listed in the proposals file."},
-            "approve_all": {"type": "boolean", "description": "Approve every actionable entry. Only when the user approved all of them."},
+            "approved_file_ids": {"type": "array", "items": {"type": "string"}, "description": "File IDs the user approved, exactly as listed in the proposals file. Approval is always explicit per file ID — there is no approve-all."},
             "note": {"type": "string", "description": "Short note recorded with the approval (e.g. what the user said)."},
         },
         "required": ["proposals_path", "approvals_path"],

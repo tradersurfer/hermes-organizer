@@ -18,7 +18,7 @@ Files to read first:
 
 - `hermes_organizer/execution.py` — hash validation, dry-run vs execute, timeout handling
 - `hermes_organizer/naming.py` — dedup, date extraction, target-aware collision logic
-- `hermes_organizer/classifier.py` — the classifier (`classify()`, keyword boundaries, filename-first ordering, confidence = best / (best + 3.0))
+- `hermes_organizer/classifier.py` — the classifier (`classify()`, keyword boundaries, filename signals weighted and summed with text scores, confidence = best / (best + 3.0))
 - `hermes_organizer/taxonomy.py` — the taxonomy rules and keyword lists the classifier scores against; vision input comes from `hermes_organizer/ocr.py`
 - `hermes-plugin/dashboard/plugin_api.py` and `hermes-plugin/desktop/plugin.js` — path traversal, write triggers
 - `hermes-plugin/plugin.yaml` and `hermes-plugin/dashboard/manifest.json` — requires_env, API declaration
@@ -30,7 +30,7 @@ If a file won't load, say which one and stop — don't invent its contents.
 ## Context you need — design decisions, don't flag these as bugs
 
 - **Read-only by default.** Execution runs only through the approval flow: proposals file → per-item approval bound by `proposal_hash` (SHA-256 of file_id + proposed_filename + target folder path) → dry-run → execute → verify → rollback. Review entries (no proposed filename) can never be approved. There are **zero `files delete` / `emptyTrash` calls anywhere** in the codebase.
-- **Confidence threshold is 0.60, locked, never lowered.** Classification is **keyword-based, not an LLM**. Filename is checked first, extracted text second.
+- **Confidence threshold is 0.60, locked, never lowered.** Classification is **keyword-based, not an LLM**. Filename signals are weighted (1.5–2.0) and summed with the text scores; the highest combined score wins — filename does not strictly outrank text.
 - **Vision is a second opinion**, not the classifier. Default provider is Cloudflare Workers AI (`llama-3.2-11b-vision-instruct`, ~40 Neurons per image, 10,000/day free allowance); fallback is Gemini (`gemini-3.5-flash`, ~10 RPM on the free tier).
 - **History that matters:** on 2026-11-13 a build agent ran `--execute` against real Drive with a fabricated approvals file and renamed 2 files. The hash-bound approval flow is the design response to that incident — **test whether it actually holds**, don't assume it does.
 - **It has done real work:** 18/18 files in a live Drive folder (Beyond Vision) were scanned, approved, renamed and moved, each verified live. This is not a demo-only tool.
@@ -42,7 +42,7 @@ If a file won't load, say which one and stop — don't invent its contents.
 - **For every finding:** severity (Critical / High / Medium / Low), file + line, what breaks or will break, evidence from the code, and a concrete fix.
 - **Attack the safety story hardest:** is there ANY path where a rename, move, or delete happens without a matching approval hash? Can a stale approval be replayed against different files? Can the hash be bypassed by editing the proposals file? Does the dry-run check the same things `execute` checks, or does it bless a plan that execute then refuses (or worse, the reverse)?
 - **Check the test claims:** 157 tests passing. Do the tests actually assert the right things, or are they passing vacuously? Point at specific weak or tautological tests by name.
-- **Check the classifier:** keyword-matching edge cases, filename-first ordering, date handling (dates must never be mistaken for DOB/expiry), the dedup logic — does the target-aware fix (proposals check the destination folder's live filenames) actually cover the collision, or just move it somewhere else?
+- **Check the classifier:** keyword-matching edge cases, filename-signal weighting (additive with text scores, not strict priority), date handling (dates must never be mistaken for DOB/expiry), the dedup logic — does the target-aware fix (proposals check the destination folder's live filenames) actually cover the collision, or just move it somewhere else?
 - **Check the dashboard API** (`hermes-plugin/dashboard/plugin_api.py` + `hermes-plugin/desktop/plugin.js`): path traversal, credential-like request bodies, what the endpoints expose, whether the pane can trigger a write without an approval.
 - **Check scale and cost:** what breaks at 1,000 files? Is the Neuron budget math right? How do 429 / 503 / daily-limit errors behave — do they fail safe or silently drop files?
 - **Check plugin / catalog readiness:** `plugin.yaml` (version 0.1.1), `requires_env` handling, secret handling, Hermes SDK conformance, Python deps (`pydantic`, `rapidocr-onnxruntime` — not stdlib, so how do they travel on install?).

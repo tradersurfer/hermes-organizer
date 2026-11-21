@@ -9,10 +9,14 @@ Flow:
   execute (dry-run by default) -> verify -> rollback if needed.
 
 Gates — execution refuses unless ALL hold:
-  1. The caller passes ``execute=True`` AND this module's
-     ``WRITE_ENABLED`` is True. run_execute.py sets WRITE_ENABLED
-     only when the user passes ``--execute`` on the command line.
-     Nothing in this codebase ever flips it on its own.
+  1. The caller passes ``execute=True`` AND a fresh, single-use
+     write token minted by ``mint_write_token()`` at the approved
+     moment (run_execute.py --execute, or the plugin's
+     organizer_execute / organizer_rollback with execute: true).
+     There is no module-global flag: each token authorizes exactly
+     one call, so two concurrent calls can never share
+     authorization. A call without a token, or with a spent token,
+     is refused with zero writes.
   2. A valid approvals file exists; every actionable proposal is
      approved with a ``proposal_hash`` matching the proposals file
      (see proposals.py — a re-scan makes old approvals stale).
@@ -49,10 +53,79 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
-from .indexer import DRIVE_CLI, DriveIndexer, RateLimiter
+from .indexer import (
+    DRIVE_CLI,
+    DRIVE_LIST_MAX_PAGE_SIZE,
+    DriveIndexer,
+    RateLimiter,
+    _fetch_all_pages,
+)
 from .proposals import match_approvals, proposal_hash
 
-WRITE_ENABLED = False  # runtime gate: only run_execute.py --execute sets this True
+_MINT_KEY = object()  # module-private: only mint_write_token() can build a token
+
+
+class WriteToken:
+    """Per-call write authorization.
+
+    Minted by ``mint_write_token()`` at the exact moment the caller
+    holds the user's approval to write. Single-use: ``execute()`` /
+    ``rollback()`` spend the token on entry, so one token authorizes
+    exactly one write call. Tokens are independent objects — two
+    concurrent calls hold different tokens and neither can observe
+    the other's authorization. There is deliberately no
+    module-global flag to race on (the old WRITE_ENABLED global was
+    removed for exactly that hazard: in a multi-request gateway two
+    requests could interleave on the shared flag).
+    """
+
+    __slots__ = ("_spent",)
+
+    def __init__(self, key: object) -> None:
+        if key is not _MINT_KEY:
+            raise TypeError(
+                "WriteToken must be minted via mint_write_token()"
+            )
+        self._spent = False
+
+    @property
+    def spent(self) -> bool:
+        """True once this token has authorized a call."""
+        return self._spent
+
+    def _spend(self) -> None:
+        self._spent = True
+
+
+def mint_write_token() -> WriteToken:
+    """Mint a fresh single-use write token for one execute()/rollback() call.
+
+    Call this only at the approved moment: run_execute.py --execute,
+    or the plugin's organizer_execute / organizer_rollback with
+    execute: true after the user's yes. Minting a token does not
+    write anything — it only creates the per-call authorization the
+    write path requires alongside execute=True.
+    """
+    return WriteToken(_MINT_KEY)
+
+
+def _require_write_token(token: object) -> WriteToken:
+    """Validate a token and spend it, or refuse with zero writes.
+
+    Returns the spent token. A missing token, a non-token, or an
+    already-spent token raises GateRefused.
+    """
+    if not isinstance(token, WriteToken) or token.spent:
+        raise GateRefused(
+            "Write refused: pass execute=True with a fresh write token "
+            "(mint one with mint_write_token() at the approved moment, "
+            "e.g. run_execute.py --execute). A token authorizes exactly "
+            "one call; reuse and cross-call sharing are refused. "
+            "Dry-run is the default; nothing was written."
+        )
+    token._spend()
+    return token
+
 
 DRIVE_FOLDER_MIME = "application/vnd.google-apps.folder"
 
@@ -142,29 +215,34 @@ class DriveWriter:
 
     def find_child(self, parent_id: str, name: str,
                    mime_type: str | None = None) -> dict | None:
-        """First non-trashed child of ``parent_id`` with this name."""
+        """First non-trashed child of ``parent_id`` with this name.
+
+        A name-equality query puts every match on page 1, so
+        limit=1 is complete: if a match exists, the first page
+        holds it.
+        """
         q = (
             f"'{parent_id}' in parents and "
             f"name = '{_escape_query_value(name)}' and trashed=false"
         )
         if mime_type:
             q += f" and mimeType = '{mime_type}'"
-        data = self._run(["files", "list", "--params", json.dumps({
+        files = _fetch_all_pages(self._run, {
             "q": q,
-            "pageSize": 10,
-            "fields": "files(id,name,mimeType,parents)",
-        })])
-        files = data.get("files", [])
+            "fields": "files(id,name,mimeType,parents),nextPageToken",
+        }, page_size=10, limit=1)
         return files[0] if files else None
 
     def list_children(self, folder_id: str) -> list[dict]:
-        """Non-trashed direct children (id, name, parents)."""
-        data = self._run(["files", "list", "--params", json.dumps({
+        """Non-trashed direct children (id, name, parents).
+
+        Paginated to the end: a collision on a later page is still
+        seen by _check_collision.
+        """
+        return _fetch_all_pages(self._run, {
             "q": f"'{folder_id}' in parents and trashed=false",
-            "pageSize": 100,
-            "fields": "files(id,name,mimeType,parents)",
-        })])
-        return data.get("files", [])
+            "fields": "files(id,name,mimeType,parents),nextPageToken",
+        }, page_size=DRIVE_LIST_MAX_PAGE_SIZE)
 
     def create_folder(self, name: str, parent_id: str) -> str:
         """Create a folder; returns its Drive ID. Counts as a write."""
@@ -377,20 +455,22 @@ def plan(proposals_doc: dict, approvals_doc: dict, drive: DriveWriter,
 
 def execute(proposals_doc: dict, approvals_doc: dict, drive: DriveWriter,
             log_path: str, *, execute: bool = False,
+            write_token: WriteToken | None = None,
             root_folder_id: str = "root") -> dict:
     """Perform the approved plan. Refuses unless the gates all hold.
 
-    Requires ``execute=True`` AND module ``WRITE_ENABLED`` (set only
-    by run_execute.py --execute). Returns a report with executed,
+    Requires ``execute=True`` AND a fresh ``write_token`` minted by
+    ``mint_write_token()``. Returns a report with executed,
     skipped, verification, and the log path. Raises GateRefused /
     WriteScopeError before or during the run; executed files stay
     logged either way.
     """
-    if not execute or not WRITE_ENABLED:
+    if not execute:
         raise GateRefused(
             "Execution refused: pass execute=True with --execute on the "
             "command line. Dry-run is the default; nothing was written."
         )
+    _require_write_token(write_token)
     planned = plan(proposals_doc, approvals_doc, drive, root_folder_id)
     if planned["refused"]:
         raise GateRefused(
@@ -534,14 +614,16 @@ def verify_log(log_path: str, drive: DriveWriter) -> list[dict]:
 
 
 def rollback(log_path: str, drive: DriveWriter, *,
-             execute: bool = False) -> dict:
+             execute: bool = False,
+             write_token: WriteToken | None = None) -> dict:
     """Restore original names + parents from an execution log.
 
     Runs in reverse log order (last change undone first). Dry-run by
     default: returns the restore plan with zero write calls. With
-    ``execute=True`` (and WRITE_ENABLED) it performs the restores.
-    Never deletes anything; a file missing from Drive is reported
-    and skipped, not an error that aborts the rest.
+    ``execute=True`` it performs the restores — and requires a fresh
+    ``write_token`` minted by ``mint_write_token()``. Never deletes
+    anything; a file missing from Drive is reported and skipped,
+    not an error that aborts the rest.
     """
     records = load_log(log_path)
     report: dict = {
@@ -550,7 +632,7 @@ def rollback(log_path: str, drive: DriveWriter, *,
         "refused": [],
         "log_path": log_path,
     }
-    if not execute or not WRITE_ENABLED:
+    if not execute:
         report["refused"].append(
             "Rollback is a dry-run unless execute=True with --execute. "
             "Nothing was restored."
@@ -564,6 +646,7 @@ def rollback(log_path: str, drive: DriveWriter, *,
             for r in reversed(records) if "file_id" in r
         ]
         return report
+    _require_write_token(write_token)
     for record in reversed(records):
         if "file_id" not in record:
             continue  # folder_created audit records are not rolled back

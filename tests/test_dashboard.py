@@ -282,7 +282,16 @@ def test_execute_via_api_then_verify(api, data_dir, tmp_path, monkeypatch):
     assert len(out["executed"]) == len(actionable)
     assert all(v["ok"] for v in out["verification"])
     assert fake.writes, "execute must have written via the fake"
-    assert execution_mod.WRITE_ENABLED is False  # gate restored per call
+    # No authorization lingers after the call: a direct core execute
+    # with execute=True but no token is refused.
+    with open(tmp_path / proposals_name, encoding="utf-8") as fh:
+        proposals_doc = json.load(fh)
+    with open(tmp_path / approvals_name, encoding="utf-8") as fh:
+        approvals_doc = json.load(fh)
+    with pytest.raises(execution_mod.GateRefused):
+        execution_mod.execute(proposals_doc, approvals_doc, DriveWriter(),
+                              str(tmp_path / "execution-log-demo.jsonl"),
+                              execute=True)
     verified = _run(api.get_verify("execution-log-demo.jsonl"))
     assert verified["status"] == "success"
     assert verified["verified_ok"] == verified["total"] == len(actionable)
@@ -300,7 +309,6 @@ def test_execute_via_api_then_verify(api, data_dir, tmp_path, monkeypatch):
     assert done["mode"] == "executed"
     assert len(done["restored"]) == len(actionable)
     assert len(fake.writes) > writes_before
-    assert execution_mod.WRITE_ENABLED is False
 
 
 # ---------------------------------------------------------------- live feed

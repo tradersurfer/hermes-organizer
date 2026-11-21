@@ -120,7 +120,6 @@ def _call(tools, fn_name, args):
 
 def main() -> int:
     tools = _load_tools()
-    from hermes_organizer import execution as execution_mod  # noqa: E402
     from hermes_organizer.execution import DriveWriter  # noqa: E402
 
     tmp = tempfile.mkdtemp(prefix="hermes-organizer-demo-")
@@ -235,8 +234,10 @@ def main() -> int:
         print(f"[8] REPORT: {rendered['files']} files -> "
               f"{rendered['out_path']}")
     finally:
+        # Restore the stubbed Drive channel. There is no write flag
+        # to reset: write authorization is per-call (minted tokens),
+        # so nothing lingers after the demo.
         DriveWriter._run = real_run
-        execution_mod.WRITE_ENABLED = False
 
     print("DEMO OK — full loop on mocks, no network, no credentials, "
           "no real Drive writes.")
